@@ -154,8 +154,18 @@ def fetch_rss_buzz():
     return items
 
 def handle_update():
-    data = fetch_anilist_data()
-    buzz = fetch_rss_buzz()
+    # 1. Fetch data with strict timeouts so it never hangs
+    try:
+        data = fetch_anilist_data()
+    except Exception as e:
+        print(f"AniList fetch error: {e}")
+        data = {}
+
+    try:
+        buzz = fetch_rss_buzz()
+    except Exception as e:
+        print(f"RSS fetch error: {e}")
+        buzz = []
 
     aired_lines = []
     for item in data.get("aired", {}).get("airingSchedules", []):
@@ -165,39 +175,29 @@ def handle_update():
         aired_lines.append(f"{title} — Episode {item['episode']} (Rating: {score})")
 
     trending_lines = []
-    for idx, m in enumerate(data.get("trending", {}).get("media", [])[:6], 1):
+    for idx, m in enumerate(data.get("trending", {}).get("media", [])[:5], 1):
         title = m["title"]["english"] or m["title"]["romaji"]
         ep = (m["nextAiringEpisode"]["episode"] - 1) if m.get("nextAiringEpisode") else "Latest"
         score = m.get("averageScore") or "N/A"
-        desc = (m.get("description") or "")[:250].replace("\n", " ")
+        desc = (m.get("description") or "")[:150].replace("\n", " ")
         trending_lines.append(f"{idx}. {title} | Ep {ep} | Rating: {score} | Trend Score: {m.get('trending', 0)}\nContext: {desc}")
 
     prompt = f"""
-    Format an anime report in this EXACT structure and style using ONLY Telegram HTML tags (<b>bold</b>, <i>italic</i>):
+    Format a clean anime update for Telegram using ONLY HTML tags (<b>, <i>, <a href="...">):
 
     1. 📺 <b>Aired Anime List</b>
-    (List the aired anime in format: Title — Episode X (Rating: XX/100))
+    {chr(10).join(aired_lines[:10]) if aired_lines else "No recent episodes found."}
 
     2. 🔥 <b>Trending Anime & Episode Ratings</b>
-    (Numbered list 1 to 6 in format: 1. Title | Ep X | Rating: XX | Trend Score: XXX)
+    {chr(10).join(trending_lines) if trending_lines else "No trending data available."}
 
     3. 🚀 <b>Why These Episodes Are Trending</b>
-    (For each top trending anime, write a rich 2-3 sentence paragraph explaining the exact plot hook, character moment, or hype factor driving the episode right now)
+    Write a concise 2-sentence paragraph explaining why the top 2 trending shows are popular right now.
 
     4. 💬 <b>Fan Reactions & Community Buzz</b>
-    (Write 3-4 energetic paragraphs capturing current fan debates, Reddit praise, and major anime news headlines from the data)
+    Summarize current community reactions and news headlines briefly.
 
-    Do NOT use Markdown (** or #) or <ul>/<li>/<br>. Keep under 3800 characters.
-
-    Raw Data:
-    AIRED:
-    {chr(10).join(aired_lines)}
-
-    TRENDING:
-    {chr(10).join(trending_lines)}
-
-    BUZZ & NEWS:
-    {chr(10).join(buzz)}
+    Do NOT use Markdown (** or #) or unsupported tags. Keep under 3500 characters.
     """
     return ask_gemini(prompt)
 
