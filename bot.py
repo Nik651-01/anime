@@ -96,7 +96,7 @@ def summarize_with_gemini(episodes, news, discussions):
     {raw_content}
     """
     response = client.models.generate_content(
-        model="gemini-3.0-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
     return response.text
