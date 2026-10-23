@@ -1,12 +1,17 @@
-name: Hourly Anime & Manga Bot
+name: Interactive Telegram Anime Bot
 
 on:
+  workflow_dispatch: # Manual start button
   schedule:
-    - cron: '0 * * * *' # Runs at minute 0 of every hour
-  workflow_dispatch:    # Lets you trigger a test run manually with 1 click
+    # Keeps a background listener window open without sending any automatic messages
+    - cron: '0 */3 * * *'
+
+concurrency:
+  group: telegram-bot-listener
+  cancel-in-progress: true
 
 jobs:
-  run-bot:
+  listen-and-reply:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -20,10 +25,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Anime Bot
+      - name: Run Interactive Bot Listener
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python bot.py
-  
