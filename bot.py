@@ -341,48 +341,10 @@ def process_command(text, chat_id):
         send_telegram_message(f"⚠️ Sorry, an error occurred while generating your <code>{cmd}</code> report. Please try again in a moment!", chat_id)
 
 def main():
-    # If triggered manually via GitHub Actions UI with an input command, run it instantly
-    manual_cmd = os.environ.get("BOT_COMMAND", "").strip()
-    if manual_cmd and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        print(f"⚡ Executing manual workflow command: {manual_cmd}")
-        process_command(manual_cmd, TELEGRAM_CHAT_ID)
-        return
-
-    print("🎧 Bot is awake and listening for Telegram commands (/update, /trending, /hype, /top, /summary)...")
-    
-    # Get current update offset so we don't re-process ancient messages
-    offset = None
-    try:
-        init_res = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?limit=1", timeout=10).json()
-        results = init_res.get("result", [])
-        if results:
-            offset = results[-1]["update_id"] + 1
-    except Exception:
-        pass
-
-    # Listen for 40 minutes (2400 seconds)
-    end_time = time.time() + 2400
-
-    while time.time() < end_time:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?timeout=30"
-        if offset:
-            url += f"&offset={offset}"
-        try:
-            res = requests.get(url, timeout=35).json()
-            for item in res.get("result", []):
-                offset = item["update_id"] + 1
-                msg = item.get("message", {})
-                text = msg.get("text", "").strip()
-                chat_id = str(msg.get("chat", {}).get("id", ""))
-
-                if text.startswith("/") and chat_id == str(TELEGRAM_CHAT_ID):
-                    print(f"⚡ Received command: {text}")
-                    process_command(text, chat_id)
-        except Exception as e:
-            print(f"Polling warning: {e}")
-            time.sleep(3)
-
-    print("⏰ 40-minute listener window finished. Shutting down until next hour's cron.")
+    command_text = os.environ.get("BOT_COMMAND", "").strip() or "/update"
+    print(f"⚡ Executing command: {command_text}")
+    process_command(command_text, TELEGRAM_CHAT_ID)
+    print("✅ Finished and shutting down!")
 
 if __name__ == "__main__":
     main()
