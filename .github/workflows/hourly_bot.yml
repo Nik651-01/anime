@@ -1,14 +1,14 @@
 name: Interactive Telegram Anime Bot
 
 on:
-  workflow_dispatch: # Manual start button
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Manual command test'
+        required: false
+        default: '/update'
   schedule:
-    # Keeps a background listener window open without sending any automatic messages
-    - cron: '0 */3 * * *'
-
-concurrency:
-  group: telegram-bot-listener
-  cancel-in-progress: true
+    - cron: '0 * * * *' # Wakes up at the top of every hour
 
 jobs:
   listen-and-reply:
@@ -25,9 +25,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Interactive Bot Listener
+      - name: Run 40-Minute Command Listener
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BOT_COMMAND: ${{ github.event.inputs.command }}
         run: python bot.py
