@@ -4,14 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: 'Manual command test'
+        description: 'Telegram command to run'
         required: false
         default: '/update'
-  schedule:
-    - cron: '0 * * * *' # Wakes up at the top of every hour
 
 jobs:
-  listen-and-reply:
+  run-command:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -25,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run 40-Minute Command Listener
+      - name: Run Command & Reply
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
