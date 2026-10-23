@@ -332,10 +332,27 @@ def process_command(text, chat_id):
         send_telegram_message(help_msg, chat_id)
 
 def main():
-    print("🎧 Listening for Telegram commands (/update, /trending, /hype, /top, /summary)...")
+    # If triggered manually via GitHub Actions UI with an input command, run it instantly
+    manual_cmd = os.environ.get("BOT_COMMAND", "").strip()
+    if manual_cmd and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        print(f"⚡ Executing manual workflow command: {manual_cmd}")
+        process_command(manual_cmd, TELEGRAM_CHAT_ID)
+        return
+
+    print("🎧 Bot is awake and listening for Telegram commands (/update, /trending, /hype, /top, /summary)...")
+    
+    # Get current update offset so we don't re-process ancient messages
     offset = None
-    # Listen for up to 55 minutes per workflow run (checks every 2 seconds via long-polling)
-    end_time = time.time() + 3300
+    try:
+        init_res = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?limit=1", timeout=10).json()
+        results = init_res.get("result", [])
+        if results:
+            offset = results[-1]["update_id"] + 1
+    except Exception:
+        pass
+
+    # Listen for 40 minutes (2400 seconds)
+    end_time = time.time() + 2400
 
     while time.time() < end_time:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?timeout=30"
@@ -355,6 +372,8 @@ def main():
         except Exception as e:
             print(f"Polling warning: {e}")
             time.sleep(3)
+
+    print("⏰ 40-minute listener window finished. Shutting down until next hour's cron.")
 
 if __name__ == "__main__":
     main()
