@@ -304,32 +304,41 @@ def process_command(text, chat_id):
     cmd = parts[0].lower().split("@")[0]
     arg = parts[1] if len(parts) > 1 else ""
 
-    if cmd == "/update":
-        send_telegram_message("⏳ <i>Generating full 4-part Anime Update...</i>", chat_id)
-        send_telegram_message(handle_update(), chat_id)
-    elif cmd == "/trending":
-        send_telegram_message("⏳ <i>Fetching today's Trending Anime...</i>", chat_id)
-        send_telegram_message(handle_trending(), chat_id)
-    elif cmd == "/hype":
-        send_telegram_message("⏳ <i>Scanning the Anime Hype Radar...</i>", chat_id)
-        send_telegram_message(handle_hype(), chat_id)
-    elif cmd == "/top":
-        send_telegram_message(handle_top(), chat_id)
-    elif cmd == "/summary":
-        send_telegram_message(f"⏳ <i>Writing summary & appeal breakdown{' for ' + arg if arg else ''}...</i>", chat_id)
-        send_telegram_message(handle_summary(arg), chat_id)
-    elif cmd in ["/start", "/help"]:
-        help_msg = (
-            "🤖 <b>Anime Command Bot Ready!</b>\n\n"
-            "Use these commands anytime:\n"
-            "• /update — Full 4-part Aired, Trending, Why & Reactions digest\n"
-            "• /trending — Today's Trending Anime & episode ratings\n"
-            "• /hype — Check which airing & upcoming anime are most hyped\n"
-            "• /top — Top 10 highest-rated anime rankings\n"
-            "• /summary — Summary of trending anime & why they're interesting\n"
-            "• /summary <i>Anime Name</i> — Deep dive on any specific anime!"
-        )
-        send_telegram_message(help_msg, chat_id)
+    try:
+        if cmd == "/update":
+            send_telegram_message("⏳ <i>Generating full 4-part Anime Update...</i>", chat_id)
+            result = handle_update()
+            send_telegram_message(result, chat_id)
+        elif cmd == "/trending":
+            send_telegram_message("⏳ <i>Fetching today's Trending Anime...</i>", chat_id)
+            result = handle_trending()
+            send_telegram_message(result, chat_id)
+        elif cmd == "/hype":
+            send_telegram_message("⏳ <i>Scanning the Anime Hype Radar...</i>", chat_id)
+            result = handle_hype()
+            send_telegram_message(result, chat_id)
+        elif cmd == "/top":
+            result = handle_top()
+            send_telegram_message(result, chat_id)
+        elif cmd == "/summary":
+            send_telegram_message(f"⏳ <i>Writing summary & appeal breakdown{' for ' + arg if arg else ''}...</i>", chat_id)
+            result = handle_summary(arg)
+            send_telegram_message(result, chat_id)
+        elif cmd in ["/start", "/help"]:
+            help_msg = (
+                "🤖 <b>Anime Command Bot Ready!</b>\n\n"
+                "Use these commands anytime:\n"
+                "• /update — Full 4-part Aired, Trending, Why & Reactions digest\n"
+                "• /trending — Today's Trending Anime & episode ratings\n"
+                "• /hype — Check which airing & upcoming anime are most hyped\n"
+                "• /top — Top 10 highest-rated anime rankings\n"
+                "• /summary — Summary of trending anime & why they're interesting\n"
+                "• /summary <i>Anime Name</i> — Deep dive on any specific anime!"
+            )
+            send_telegram_message(help_msg, chat_id)
+    except Exception as e:
+        print(f"❌ Error processing command {cmd}: {e}")
+        send_telegram_message(f"⚠️ Sorry, an error occurred while generating your <code>{cmd}</code> report. Please try again in a moment!", chat_id)
 
 def main():
     # If triggered manually via GitHub Actions UI with an input command, run it instantly
