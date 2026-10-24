@@ -136,6 +136,47 @@ def fetch_anilist_data(search_title=None):
     res = requests.post(url, json={"query": query, "variables": {"start": day_ago, "end": now}}, timeout=15)
     return res.json().get("data", {})
 
+def handle_list():
+    url = "https://graphql.anilist.co"
+    now = int(time.time())
+    # Cover today's 24-hour window (from start of current UTC day to end)
+    start_of_day = now - (now % 86400)
+    end_of_day = start_of_day + 86400
+
+    query = """
+    query ($start: Int, $end: Int) {
+      Page(perPage: 30) {
+        airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME_ASC) {
+          episode
+          airingAt
+          media {
+            title { english romaji }
+            averageScore
+            siteUrl
+          }
+        }
+      }
+    }
+    """
+    try:
+        res = requests.post(url, json={"query": query, "variables": {"start": start_of_day, "end": end_of_day}}, timeout=15)
+        schedules = res.json().get("data", {}).get("Page", {}).get("airingSchedules", [])
+        if not schedules:
+            return "📅 <b>No anime episodes scheduled for the remainder of today!</b>"
+        
+        current_date_str = time.strftime('%B %d, %Y', time.gmtime(now))
+        lines = [f"📅 <b>Anime Episodes Airing Today ({current_date_str}):</b>\n"]
+        for item in schedules:
+            m = item["media"]
+            title = m["title"]["english"] or m["title"]["romaji"]
+            ep = item["episode"]
+            air_time = time.strftime('%H:%M UTC', time.gmtime(item['airingAt']))
+            score = f"{m['averageScore']}/100" if m.get("averageScore") else "N/A"
+            lines.append(f"• <b>{title}</b> — Ep {ep} at {air_time} (Rating: {score})")
+        return "\n".join(lines)[:3800]
+    except Exception as e:
+        return f"⚠️ Error fetching today's schedule: {e}"
+
 def fetch_rss_buzz():
     feeds = [
         ("Reddit Episode Thread", "https://www.reddit.com/r/anime/search.rss?q=flair%3AEpisode&restrict_sr=on&sort=hot&t=day"),
@@ -269,14 +310,24 @@ def handle_summary(custom_query=""):
         data = fetch_anilist_data(search_title=custom_query)
         m = data.get("Media")
         if not m:
-            return f"❓ Could not find an anime matching '<b>{custom_query}</b>'. Try `/summary One Piece` or just `/summary`!"
+            return f"❓ Could not find an anime matching '<b>{custom_query}</b>'. Try `/summary One Piece`!"
+        
         title = m["title"]["english"] or m["title"]["romaji"]
-        raw = f"Title: {title}\nScore: {m.get('averageScore')}/100\nGenres: {', '.join(m.get('genres', []))}\nSynopsis: {m.get('description')}"
+        status_text = m.get('status', 'UNKNOWN')
+        status_map = {
+            'RELEASING': '🟢 Ongoing (Currently Airing)',
+            'NOT_YET_RELEASED': '⏳ Upcoming (Not Yet Released)',
+            'FINISHED': '🔴 Completed / Just Ended'
+        }
+        friendly_status = status_map.get(status_text, status_text)
+
+        raw = f"Title: {title}\nStatus: {friendly_status}\nScore: {m.get('averageScore')}/100\nGenres: {', '.join(m.get('genres', []))}\nSynopsis: {m.get('description')}"
         prompt = f"""
         Write an engaging Telegram spotlight for <b>{title}</b> using ONLY HTML tags (<b>, <i>):
         1. 📖 <b>Plot Summary</b> (Clear, spoiler-free hook)
-        2. ✨ <b>Why It's So Interesting & Worth Watching</b> (Themes, animation/story appeal, and why fans love it)
-        3. ⭐ <b>Verdict & Rating</b> ({m.get('averageScore')}/100)
+        2. 📊 <b>Status & Airing Note</b> (Status is: {friendly_status}. Write a custom 2-sentence note here tailored specifically to whether this show is upcoming, ongoing weekly, or has just recently finished airing/ended!)
+        3. ✨ <b>Why It's Interesting & Worth Watching</b> (Themes, appeal, and fan expectations)
+        4. ⭐ <b>Verdict & Rating</b> ({m.get('averageScore')}/100)
         Do NOT use Markdown (** or #).
         Data: {raw}
         """
@@ -287,12 +338,12 @@ def handle_summary(custom_query=""):
         raw = ""
         for m in top_shows:
             title = m["title"]["english"] or m["title"]["romaji"]
-            raw += f"Title: {title} (Rating: {m.get('averageScore')}/100)\nSynopsis: {(m.get('description') or '')[:350]}\n\n"
+            s = m.get('status', 'RELEASING')
+            raw += f"Title: {title} (Status: {s}, Rating: {m.get('averageScore')}/100)\nSynopsis: {(m.get('description') or '')[:350]}\n\n"
         prompt = f"""
-        For each of these 4 trending anime, write a mini guide using ONLY Telegram HTML tags (<b>, <i>):
-        - 📖 <b>What It's About</b> (2-sentence summary)
-        - ✨ <b>Why It's So Interesting</b> (What makes the premise or current season special)
-        Tip at the bottom: Mention that the user can also type `/summary <anime name>` for any specific show!
+        For each of these trending anime, write a mini guide using ONLY Telegram HTML tags (<b>, <i>), making sure to mention their current airing status (ongoing vs just ended vs upcoming):
+        - 📖 <b>What It's About & Status</b> 
+        - ✨ <b>Why It's Interesting</b>
         Do NOT use Markdown (** or #).
         Data:
         {raw}
@@ -309,6 +360,10 @@ def process_command(text, chat_id):
             send_telegram_message("⏳ <i>Generating full 4-part Anime Update...</i>", chat_id)
             result = handle_update()
             send_telegram_message(result, chat_id)
+        elif cmd == "/list":
+            send_telegram_message("⏳ <i>Fetching today's airing schedule...</i>", chat_id)
+            result = handle_list()
+            send_telegram_message(result, chat_id)
         elif cmd == "/trending":
             send_telegram_message("⏳ <i>Fetching today's Trending Anime...</i>", chat_id)
             result = handle_trending()
@@ -321,25 +376,25 @@ def process_command(text, chat_id):
             result = handle_top()
             send_telegram_message(result, chat_id)
         elif cmd == "/summary":
-            send_telegram_message(f"⏳ <i>Writing summary & appeal breakdown{' for ' + arg if arg else ''}...</i>", chat_id)
+            send_telegram_message(f"⏳ <i>Writing summary & status breakdown{' for ' + arg if arg else ''}...</i>", chat_id)
             result = handle_summary(arg)
             send_telegram_message(result, chat_id)
         elif cmd in ["/start", "/help"]:
             help_msg = (
                 "🤖 <b>Anime Command Bot Ready!</b>\n\n"
-                "Use these commands anytime:\n"
+                "Available commands:\n"
+                "• /list — Show episodes airing today with times & ratings\n"
                 "• /update — Full 4-part Aired, Trending, Why & Reactions digest\n"
                 "• /trending — Today's Trending Anime & episode ratings\n"
-                "• /hype — Check which airing & upcoming anime are most hyped\n"
+                "• /hype — Check hyped airing & upcoming anime\n"
                 "• /top — Top 10 highest-rated anime rankings\n"
-                "• /summary — Summary of trending anime & why they're interesting\n"
-                "• /summary <i>Anime Name</i> — Deep dive on any specific anime!"
+                "• /summary — Summary of trending anime status & appeal\n"
+                "• /summary <i>Anime Name</i> — Deep dive & status note on any specific show!"
             )
             send_telegram_message(help_msg, chat_id)
     except Exception as e:
         print(f"❌ Error processing command {cmd}: {e}")
-        send_telegram_message(f"⚠️ Sorry, an error occurred while generating your <code>{cmd}</code> report. Please try again in a moment!", chat_id)
-
+        send_telegram_message(f"⚠️ Sorry, an error occurred while generating your <code>{cmd}</code> report.", chat_id)
 def main():
     command_text = os.environ.get("BOT_COMMAND", "").strip() or "/update"
     print(f"⚡ Executing command: {command_text}")
