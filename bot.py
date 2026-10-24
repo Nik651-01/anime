@@ -139,7 +139,6 @@ def fetch_anilist_data(search_title=None):
 def handle_list():
     url = "https://graphql.anilist.co"
     now = int(time.time())
-    # Cover today's 24-hour window (from start of current UTC day to end)
     start_of_day = now - (now % 86400)
     end_of_day = start_of_day + 86400
 
@@ -160,17 +159,24 @@ def handle_list():
     """
     try:
         res = requests.post(url, json={"query": query, "variables": {"start": start_of_day, "end": end_of_day}}, timeout=15)
-        schedules = res.json().get("data", {}).get("Page", {}).get("airingSchedules", [])
+        response_json = res.json()
+        
+        # Safe check in case response or data is None
+        if not response_json or not response_json.get("data"):
+            return "📅 <b>No anime episodes scheduled for today or unable to reach AniList.</b>"
+
+        schedules = response_json["data"].get("Page", {}).get("airingSchedules", [])
         if not schedules:
             return "📅 <b>No anime episodes scheduled for the remainder of today!</b>"
         
         current_date_str = time.strftime('%B %d, %Y', time.gmtime(now))
         lines = [f"📅 <b>Anime Episodes Airing Today ({current_date_str}):</b>\n"]
         for item in schedules:
-            m = item["media"]
-            title = m["title"]["english"] or m["title"]["romaji"]
-            ep = item["episode"]
-            air_time = time.strftime('%H:%M UTC', time.gmtime(item['airingAt']))
+            m = item["media"] or {}
+            title_obj = m.get("title") or {}
+            title = title_obj.get("english") or title_obj.get("romaji") or "Unknown Title"
+            ep = item.get("episode", "?")
+            air_time = time.strftime('%H:%M UTC', time.gmtime(item['airingAt'])) if item.get('airingAt') else "TBA"
             score = f"{m['averageScore']}/100" if m.get("averageScore") else "N/A"
             lines.append(f"• <b>{title}</b> — Ep {ep} at {air_time} (Rating: {score})")
         return "\n".join(lines)[:3800]
