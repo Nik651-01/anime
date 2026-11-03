@@ -14,7 +14,7 @@ if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, GEMINI_API_KEY]):
     sys.exit(1)
 
 HEADERS = {
-    "User-Agent": "linux:anime.command.bot:v5.0 (by /u/anime_digest_bot)",
+    "User-Agent": "linux:anime.mystery.bot:v6.0 (by /u/anime_mystery_bot)",
     "Accept": "application/rss+xml, application/xml, text/xml, */*"
 }
 
@@ -57,304 +57,210 @@ def ask_gemini(prompt):
         except Exception as e:
             print(f"⚠️ {model_name} busy ({e}), trying next...")
             time.sleep(1)
-    return "⚠️ Gemini AI is temporarily at max capacity. Please try your command again in 30 seconds!"
+    return "⚠️ Gemini AI is temporarily at max capacity. Please try again in 30 seconds!"
 
-def fetch_anilist_data(search_title=None):
+def fetch_anilist_media(search_title):
     url = "https://graphql.anilist.co"
-    now = int(time.time())
-    day_ago = now - 86400
-
-    if search_title:
-        query = """
-        query ($search: String) {
-          Media(search: $search, type: ANIME) {
-            title { english romaji }
-            averageScore
-            trending
-            popularity
-            episodes
-            status
-            genres
-            description(asHtml: false)
-            siteUrl
-            reviews(limit: 3, sort: RATING_DESC) {
-              nodes { summary score }
-            }
-          }
+    query = """
+    query ($search: String) {
+      Media(search: $search, type: ANIME) {
+        title { english romaji }
+        averageScore
+        status
+        genres
+        description(asHtml: false)
+        siteUrl
+        characters(perPage: 5, sort: ROLE) {
+          nodes { name { full } }
         }
-        """
+      }
+    }
+    """
+    try:
         res = requests.post(url, json={"query": query, "variables": {"search": search_title}}, timeout=15)
         return res.json().get("data", {})
+    except Exception:
+        return {}
 
-    query = """
-    query ($start: Int, $end: Int) {
-      aired: Page(perPage: 15) {
-        airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME_DESC) {
-          episode
-          media {
-            title { english romaji }
-            averageScore
-            trending
-            siteUrl
-          }
-        }
-      }
-      trending: Page(perPage: 8) {
-        media(type: ANIME, status: RELEASING, sort: TRENDING_DESC) {
-          title { english romaji }
-          averageScore
-          trending
-          popularity
-          nextAiringEpisode { episode }
-          description(asHtml: false)
-          siteUrl
-          reviews(limit: 2, sort: CREATED_AT_DESC) {
-            nodes { summary score }
-          }
-        }
-      }
-      upcoming_hype: Page(perPage: 5) {
-        media(type: ANIME, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) {
-          title { english romaji }
-          popularity
-          trending
-          description(asHtml: false)
-          siteUrl
-        }
-      }
-      top_airing: Page(perPage: 10) {
-        media(type: ANIME, status: RELEASING, sort: SCORE_DESC) {
-          title { english romaji }
-          averageScore
-          trending
-          popularity
-          nextAiringEpisode { episode }
-        }
-      }
-    }
-    """
-    res = requests.post(url, json={"query": query, "variables": {"start": day_ago, "end": now}}, timeout=15)
-    return res.json().get("data", {})
-
-def handle_list():
-    url = "https://graphql.anilist.co"
-    now = int(time.time())
-    start_of_day = now - (now % 86400)
-    end_of_day = start_of_day + 86400
-
-    query = """
-    query ($start: Int, $end: Int) {
-      Page(perPage: 30) {
-        airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME_ASC) {
-          episode
-          airingAt
-          media {
-            title { english romaji }
-            averageScore
-            siteUrl
-          }
-        }
-      }
-    }
-    """
-    try:
-        res = requests.post(url, json={"query": query, "variables": {"start": start_of_day, "end": end_of_day}}, timeout=15)
-        response_json = res.json()
-        
-        # Safe check in case response or data is None
-        if not response_json or not response_json.get("data"):
-            return "📅 <b>No anime episodes scheduled for today or unable to reach AniList.</b>"
-
-        schedules = response_json["data"].get("Page", {}).get("airingSchedules", [])
-        if not schedules:
-            return "📅 <b>No anime episodes scheduled for the remainder of today!</b>"
-        
-        current_date_str = time.strftime('%B %d, %Y', time.gmtime(now))
-        lines = [f"📅 <b>Anime Episodes Airing Today ({current_date_str}):</b>\n"]
-        for item in schedules:
-            m = item["media"] or {}
-            title_obj = m.get("title") or {}
-            title = title_obj.get("english") or title_obj.get("romaji") or "Unknown Title"
-            ep = item.get("episode", "?")
-            air_time = time.strftime('%H:%M UTC', time.gmtime(item['airingAt'])) if item.get('airingAt') else "TBA"
-            score = f"{m['averageScore']}/100" if m.get("averageScore") else "N/A"
-            lines.append(f"• <b>{title}</b> — Ep {ep} at {air_time} (Rating: {score})")
-        return "\n".join(lines)[:3800]
-    except Exception as e:
-        return f"⚠️ Error fetching today's schedule: {e}"
-
-def fetch_rss_buzz():
-    feeds = [
-        ("Reddit Episode Thread", "https://www.reddit.com/r/anime/search.rss?q=flair%3AEpisode&restrict_sr=on&sort=hot&t=day"),
-        ("Anime News", "https://www.animenewsnetwork.com/all/rss.xml")
-    ]
+def fetch_reddit_theories(query_term):
+    url = f"https://www.reddit.com/r/anime/search.rss?q={query_term}+theory+mystery+lore&restrict_sr=on&sort=relevance&t=all"
     items = []
-    for label, url in feeds:
-        try:
-            res = requests.get(url, headers=HEADERS, timeout=12)
-            feed = feedparser.parse(res.content)
-            for entry in feed.entries[:6]:
-                snippet = entry.get("summary", "")[:300].replace("\n", " ")
-                items.append(f"[{label}] {entry.title} | {snippet}")
-        except Exception:
-            pass
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=10)
+        feed = feedparser.parse(res.content)
+        for entry in feed.entries[:5]:
+            snippet = entry.get("summary", "")[:300].replace("\n", " ")
+            items.append(f"[Theory/Discussion] {entry.title} | {snippet}")
+    except Exception:
+        pass
     return items
 
-def handle_update():
-    # 1. Fetch data with strict timeouts so it never hangs
-    try:
-        data = fetch_anilist_data()
-    except Exception as e:
-        print(f"AniList fetch error: {e}")
-        data = {}
-
-    try:
-        buzz = fetch_rss_buzz()
-    except Exception as e:
-        print(f"RSS fetch error: {e}")
-        buzz = []
-
-    aired_lines = []
-    for item in data.get("aired", {}).get("airingSchedules", []):
-        m = item["media"]
-        title = m["title"]["english"] or m["title"]["romaji"]
-        score = f"{m['averageScore']}/100" if m.get("averageScore") else "N/A"
-        aired_lines.append(f"{title} — Episode {item['episode']} (Rating: {score})")
-
-    trending_lines = []
-    for idx, m in enumerate(data.get("trending", {}).get("media", [])[:5], 1):
-        title = m["title"]["english"] or m["title"]["romaji"]
-        ep = (m["nextAiringEpisode"]["episode"] - 1) if m.get("nextAiringEpisode") else "Latest"
-        score = m.get("averageScore") or "N/A"
-        desc = (m.get("description") or "")[:150].replace("\n", " ")
-        trending_lines.append(f"{idx}. {title} | Ep {ep} | Rating: {score} | Trend Score: {m.get('trending', 0)}\nContext: {desc}")
-
-    prompt = f"""
-    Format a clean anime update for Telegram using ONLY HTML tags (<b>, <i>, <a href="...">):
-
-    1. 📺 <b>Aired Anime List</b>
-    {chr(10).join(aired_lines[:10]) if aired_lines else "No recent episodes found."}
-
-    2. 🔥 <b>Trending Anime & Episode Ratings</b>
-    {chr(10).join(trending_lines) if trending_lines else "No trending data available."}
-
-    3. 🚀 <b>Why These Episodes Are Trending</b>
-    Write a concise 2-sentence paragraph explaining why the top 2 trending shows are popular right now.
-
-    4. 💬 <b>Fan Reactions & Community Buzz</b>
-    Summarize current community reactions and news headlines briefly.
-
-    Do NOT use Markdown (** or #) or unsupported tags. Keep under 3500 characters.
-    """
-    return ask_gemini(prompt)
-
-def handle_trending():
-    data = fetch_anilist_data()
-    trending_lines = []
-    for idx, m in enumerate(data.get("trending", {}).get("media", [])[:8], 1):
-        title = m["title"]["english"] or m["title"]["romaji"]
-        ep = (m["nextAiringEpisode"]["episode"] - 1) if m.get("nextAiringEpisode") else "Latest"
-        score = m.get("averageScore") or "N/A"
-        desc = (m.get("description") or "")[:220].replace("\n", " ")
-        trending_lines.append(f"{idx}. {title} | Ep {ep} | Rating: {score}/100 | Trend Score: {m.get('trending', 0)}\nInfo: {desc}")
-
-    prompt = f"""
-    Create today's 🔥 <b>Trending Anime of the Day</b> report for Telegram using ONLY HTML tags (<b>, <i>):
-    1. List the Top 8 Trending Anime today in clean numbered format: `1. <b>Title</b> | Ep X | Rating: XX | Trend Score: XXX`
-    2. Below the list, include a short breakdown of why the Top 3 shows are dominating today's charts.
-    Do NOT use Markdown (** or #).
-
-    Data:
-    {chr(10).join(trending_lines)}
-    """
-    return ask_gemini(prompt)
-
-def handle_hype():
-    data = fetch_anilist_data()
-    buzz = fetch_rss_buzz()
-    trending = data.get("trending", {}).get("media", [])[:5]
-    upcoming = data.get("upcoming_hype", {}).get("media", [])[:5]
-
-    raw = "CURRENTLY AIRING HYPE:\n"
-    for m in trending:
-        t = m["title"]["english"] or m["title"]["romaji"]
-        raw += f"- {t} (Trend Score: {m.get('trending', 0)}, Rating: {m.get('averageScore')})\n"
-
-    raw += "\nMOST HYPED UPCOMING ANIME:\n"
-    for m in upcoming:
-        t = m["title"]["english"] or m["title"]["romaji"]
-        raw += f"- {t} ({m.get('popularity', 0)} fans waiting) | {(m.get('description') or '')[:180]}\n"
-
-    raw += "\nBREAKING NEWS:\n" + "\n".join(buzz[:6])
-
-    prompt = f"""
-    Create an ⚡ <b>Anime Hype Radar</b> report for Telegram using ONLY HTML tags (<b>, <i>):
-    - Section 1: 🚨 <b>Hype Meter: Currently Exploding</b> (Which airing anime has massive hype right now & why)
-    - Section 2: ⏳ <b>Most Hyped Upcoming Releases</b> (Shows fans are waiting for most)
-    - Section 3: 📰 <b>Hyped Industry Announcements</b>
-    Do NOT use Markdown (** or #).
-
-    Data:
-    {raw}
-    """
-    return ask_gemini(prompt)
-
-def handle_top():
-    data = fetch_anilist_data()
-    top_airing = data.get("top_airing", {}).get("media", [])[:10]
-    lines = ["🏆 <b>Top 10 Highest-Rated Airing Anime Right Now</b>\n"]
-    for idx, m in enumerate(top_airing, 1):
-        title = m["title"]["english"] or m["title"]["romaji"]
-        ep = (m["nextAiringEpisode"]["episode"] - 1) if m.get("nextAiringEpisode") else "Airing"
-        score = m.get("averageScore") or "N/A"
-        trend = m.get("trending", 0)
-        lines.append(f"{idx}. <b>{title}</b>\n   ⭐ Rating: <b>{score}/100</b> | 📺 Ep: {ep} | 🔥 Trend: {trend}")
-    return "\n\n".join(lines)
-
-def handle_summary(custom_query=""):
-    if custom_query:
-        data = fetch_anilist_data(search_title=custom_query)
-        m = data.get("Media")
-        if not m:
-            return f"❓ Could not find an anime matching '<b>{custom_query}</b>'. Try `/summary One Piece`!"
-        
-        title = m["title"]["english"] or m["title"]["romaji"]
-        status_text = m.get('status', 'UNKNOWN')
-        status_map = {
-            'RELEASING': '🟢 Ongoing (Currently Airing)',
-            'NOT_YET_RELEASED': '⏳ Upcoming (Not Yet Released)',
-            'FINISHED': '🔴 Completed / Just Ended'
+def handle_ongoing_questions():
+    url = "https://graphql.anilist.co"
+    query = """
+    query {
+      Page(perPage: 10) {
+        media(type: ANIME, status: RELEASING, sort: TRENDING_DESC) {
+          title { english romaji }
+          genres
+          averageScore
+          description(asHtml: false)
+          nextAiringEpisode { episode }
         }
-        friendly_status = status_map.get(status_text, status_text)
+      }
+    }
+    """
+    try:
+        res = requests.post(url, json={"query": query}, timeout=15)
+        data = res.json().get("data", {}).get("Page", {}).get("media", [])
+        if not data:
+            return "❌ No ongoing anime found at the moment."
 
-        raw = f"Title: {title}\nStatus: {friendly_status}\nScore: {m.get('averageScore')}/100\nGenres: {', '.join(m.get('genres', []))}\nSynopsis: {m.get('description')}"
-        prompt = f"""
-        Write an engaging Telegram spotlight for <b>{title}</b> using ONLY HTML tags (<b>, <i>):
-        1. 📖 <b>Plot Summary</b> (Clear, spoiler-free hook)
-        2. 📊 <b>Status & Airing Note</b> (Status is: {friendly_status}. Write a custom 2-sentence note here tailored specifically to whether this show is upcoming, ongoing weekly, or has just recently finished airing/ended!)
-        3. ✨ <b>Why It's Interesting & Worth Watching</b> (Themes, appeal, and fan expectations)
-        4. ⭐ <b>Verdict & Rating</b> ({m.get('averageScore')}/100)
-        Do NOT use Markdown (** or #).
-        Data: {raw}
-        """
-        return ask_gemini(prompt)
-    else:
-        data = fetch_anilist_data()
-        top_shows = data.get("trending", {}).get("media", [])[:4]
-        raw = ""
-        for m in top_shows:
+        raw_shows = []
+        for m in data:
             title = m["title"]["english"] or m["title"]["romaji"]
-            s = m.get('status', 'RELEASING')
-            raw += f"Title: {title} (Status: {s}, Rating: {m.get('averageScore')}/100)\nSynopsis: {(m.get('description') or '')[:350]}\n\n"
+            ep = (m["nextAiringEpisode"]["episode"] - 1) if m.get("nextAiringEpisode") else "Current"
+            genres = ", ".join(m.get("genres", []))
+            synopsis = (m.get("description") or "")[:200].replace("\n", " ")
+            raw_shows.append(f"- Anime: {title} (Latest Ep: {ep}, Genres: {genres})\n  Plot Hook: {synopsis}")
+
         prompt = f"""
-        For each of these trending anime, write a mini guide using ONLY Telegram HTML tags (<b>, <i>), making sure to mention their current airing status (ongoing vs just ended vs upcoming):
-        - 📖 <b>What It's About & Status</b> 
-        - ✨ <b>Why It's Interesting</b>
-        Do NOT use Markdown (** or #).
-        Data:
-        {raw}
+        You are an Anime Mystery & Trivia Master for a Telegram channel. 
+        Based on the following currently ONGOING anime series, generate a fun, engaging series of questions or hidden mystery prompts for the channel members to solve.
+        
+        Rules:
+        - Use ONLY Telegram HTML tags (<b>, <i>, <tg-spoiler>). Do NOT use Markdown (** or #).
+        - For each of the top ongoing shows provided below, create:
+          1. 📺 <b>[Anime Title] (Ep X)</b>
+          2. ❓ <b>The Hidden Question / Lore Riddle:</b> (A compelling question about what mystery, plot thread, or conflict characters are facing in the latest episodes).
+          3. 🔒 <b>Answer / Clue:</b> (Wrap the answer or spoiler in <tg-spoiler>...</tg-spoiler> tags so channel members can tap to reveal).
+
+        Current Ongoing Shows Data:
+        {chr(10).join(raw_shows)}
         """
         return ask_gemini(prompt)
+    except Exception as e:
+        return f"⚠️ Error generating ongoing questions: {e}"
+
+def handle_mysteries(query):
+    if not query:
+        return "❓ Please specify an anime name! Example: <code>/mysteries Attack on Titan</code>"
+    data = fetch_anilist_media(query)
+    media = data.get("Media")
+    if not media:
+        return f"❓ Could not find an anime matching '<b>{query}</b>'."
+    
+    title = media["title"]["english"] or media["title"]["romaji"]
+    discussions = fetch_reddit_theories(title)
+
+    prompt = f"""
+    You are an expert Anime Mystery Sleuth & Lore Detective. Analyze <b>{title}</b> and present its biggest hidden questions.
+    Use ONLY Telegram HTML tags (<b>, <i>, <tg-spoiler>). Do NOT use Markdown (** or #).
+
+    Structure your report into:
+    1. 🔍 <b>Unsolved Mysteries & Hidden Questions</b> (Highlight the major plot holes, secret identities, or open-ended questions remaining in the series).
+    2. 🕵️‍♂️ <b>Subtle Clues & In-Universe Hints</b> (What hints has the author dropped so far?)
+    3. 🧠 <b>Top Fan Theories</b> (Summarize active community theories addressing these mysteries. Wrap major plot spoilers inside <tg-spoiler>...</tg-spoiler> tags).
+
+    Anime Data:
+    Title: {title}
+    Synopsis: {media.get('description')}
+    Community Discussions: {chr(10).join(discussions) if discussions else 'None found.'}
+    """
+    return ask_gemini(prompt)
+
+def handle_foreshadow(query):
+    if not query:
+        return "❓ Please specify an anime name! Example: <code>/foreshadow One Piece</code>"
+    data = fetch_anilist_media(query)
+    media = data.get("Media")
+    if not media:
+        return f"❓ Could not find an anime matching '<b>{query}</b>'."
+    
+    title = media["title"]["english"] or media["title"]["romaji"]
+    prompt = f"""
+    You are an Anime Foreshadowing & Easter Egg Expert. Analyze <b>{title}</b>.
+    Use ONLY Telegram HTML tags (<b>, <i>, <tg-spoiler>). Do NOT use Markdown (** or #).
+
+    Structure your report into:
+    1. 👁️ <b>Hidden Foreshadowing & Visual Cues</b> (Details in openings, character designs, or background art that hinted at future twists).
+    2. 🧩 <b>Early-Series Parallels</b> (Clues dropped early on that fans only understood much later).
+    3. ⚠️ <b>Spoiler Warning Note</b> (Wrap major payoff spoilers inside <tg-spoiler>...</tg-spoiler> tags).
+
+    Anime Synopsis: {media.get('description')}
+    """
+    return ask_gemini(prompt)
+
+def handle_theories(query):
+    if not query:
+        return "❓ Please specify an anime name! Example: <code>/theories Jujutsu Kaisen</code>"
+    data = fetch_anilist_media(query)
+    media = data.get("Media")
+    if not media:
+        return f"❓ Could not find an anime matching '<b>{query}</b>'."
+    
+    title = media["title"]["english"] or media["title"]["romaji"]
+    discussions = fetch_reddit_theories(title)
+
+    prompt = f"""
+    You are an Anime Theory Crafter. Analyze <b>{title}</b> and the community buzz.
+    Use ONLY Telegram HTML tags (<b>, <i>, <tg-spoiler>). Do NOT use Markdown (** or #).
+
+    Structure your report into:
+    1. 💡 <b>Most Popular Fan Theories</b> (What are fans currently arguing or theorizing about this show?)
+    2. 📉 <b>Plausibility Breakdown</b> (Which theories have strong evidence and which are stretches?)
+    3. 🔒 <b>Spoiler Status</b> (Wrap specific spoilers in <tg-spoiler>...</tg-spoiler> tags).
+
+    Data:
+    Title: {title}
+    Community Threads: {chr(10).join(discussions) if discussions else 'Standard popular theories apply.'}
+    """
+    return ask_gemini(prompt)
+
+def handle_lore(query):
+    if not query:
+        return "❓ Please specify an anime name! Example: <code>/lore Hunter x Hunter</code>"
+    data = fetch_anilist_media(query)
+    media = data.get("Media")
+    if not media:
+        return f"❓ Could not find an anime matching '<b>{query}</b>'."
+    
+    title = media["title"]["english"] or media["title"]["romaji"]
+    prompt = f"""
+    You are an Anime Lore Historian. Break down the deep world-building and history of <b>{title}</b>.
+    Use ONLY Telegram HTML tags (<b>, <i>). Do NOT use Markdown (** or #).
+
+    Structure your report into:
+    1. 📜 <b>World History & Origins</b> (The backstory or ancient lore of the universe).
+    2. 🏛️ <b>Factions, Kingdoms, or Systems</b> (Power structures, magic systems, or societal rules).
+    3. 🌐 <b>Unexplored Regions & Deep Lore Secrets</b> (Areas of the world still shrouded in mystery).
+
+    Synopsis: {media.get('description')}
+    """
+    return ask_gemini(prompt)
+
+def handle_summary(query):
+    if not query:
+        return "❓ Please specify an anime name! Example: <code>/summary Steins;Gate</code>"
+    data = fetch_anilist_media(query)
+    media = data.get("Media")
+    if not media:
+        return f"❓ Could not find an anime matching '<b>{query}</b>'."
+    
+    title = media["title"]["english"] or media["title"]["romaji"]
+    status_text = media.get('status', 'UNKNOWN')
+    status_map = {'RELEASING': '🟢 Ongoing', 'NOT_YET_RELEASED': '⏳ Upcoming', 'FINISHED': '🔴 Completed'}
+
+    prompt = f"""
+    Write an engaging breakdown for <b>{title}</b> using ONLY HTML tags (<b>, <i>, <tg-spoiler>). Do NOT use Markdown (** or #):
+    1. 📖 <b>Plot Overview</b> (Clean synopsis)
+    2. 📊 <b>Status</b> ({status_map.get(status_text, status_text)})
+    3. ❓ <b>Key Remaining Questions & Mysteries</b> (What major questions does this show leave open or unresolved for fans to ponder?)
+    4. ⭐ <b>Rating & Verdict</b> ({media.get('averageScore')}/100)
+
+    Data: Synopsis: {media.get('description')}
+    """
+    return ask_gemini(prompt)
 
 def process_command(text, chat_id):
     parts = text.strip().split(maxsplit=1)
@@ -362,47 +268,42 @@ def process_command(text, chat_id):
     arg = parts[1] if len(parts) > 1 else ""
 
     try:
-        if cmd == "/update":
-            send_telegram_message("⏳ <i>Generating full 4-part Anime Update...</i>", chat_id)
-            result = handle_update()
-            send_telegram_message(result, chat_id)
-        elif cmd == "/list":
-            send_telegram_message("⏳ <i>Fetching today's airing schedule...</i>", chat_id)
-            result = handle_list()
-            send_telegram_message(result, chat_id)
-        elif cmd == "/trending":
-            send_telegram_message("⏳ <i>Fetching today's Trending Anime...</i>", chat_id)
-            result = handle_trending()
-            send_telegram_message(result, chat_id)
-        elif cmd == "/hype":
-            send_telegram_message("⏳ <i>Scanning the Anime Hype Radar...</i>", chat_id)
-            result = handle_hype()
-            send_telegram_message(result, chat_id)
-        elif cmd == "/top":
-            result = handle_top()
-            send_telegram_message(result, chat_id)
+        if cmd == "/ongoing":
+            send_telegram_message("⏳ <i>Generating mystery questions for all ongoing anime...</i>", chat_id)
+            send_telegram_message(handle_ongoing_questions(), chat_id)
+        elif cmd == "/mysteries":
+            send_telegram_message(f"🔍 <i>Hunting down hidden mysteries & questions for '{arg}'...</i>", chat_id)
+            send_telegram_message(handle_mysteries(arg), chat_id)
+        elif cmd == "/foreshadow":
+            send_telegram_message(f"👁️ <i>Scanning for subtle foreshadowing & clues in '{arg}'...</i>", chat_id)
+            send_telegram_message(handle_foreshadow(arg), chat_id)
+        elif cmd == "/theories":
+            send_telegram_message(f"💡 <i>Gathering community fan theories for '{arg}'...</i>", chat_id)
+            send_telegram_message(handle_theories(arg), chat_id)
+        elif cmd == "/lore":
+            send_telegram_message(f"📜 <i>Unrolling the historical lore of '{arg}'...</i>", chat_id)
+            send_telegram_message(handle_lore(arg), chat_id)
         elif cmd == "/summary":
-            send_telegram_message(f"⏳ <i>Writing summary & status breakdown{' for ' + arg if arg else ''}...</i>", chat_id)
-            result = handle_summary(arg)
-            send_telegram_message(result, chat_id)
+            send_telegram_message(f"⏳ <i>Analyzing plot & lingering questions for '{arg}'...</i>", chat_id)
+            send_telegram_message(handle_summary(arg), chat_id)
         elif cmd in ["/start", "/help"]:
             help_msg = (
-                "🤖 <b>Anime Command Bot Ready!</b>\n\n"
-                "Available commands:\n"
-                "• /list — Show episodes airing today with times & ratings\n"
-                "• /update — Full 4-part Aired, Trending, Why & Reactions digest\n"
-                "• /trending — Today's Trending Anime & episode ratings\n"
-                "• /hype — Check hyped airing & upcoming anime\n"
-                "• /top — Top 10 highest-rated anime rankings\n"
-                "• /summary — Summary of trending anime status & appeal\n"
-                "• /summary <i>Anime Name</i> — Deep dive & status note on any specific show!"
+                "🕵️‍♂️ <b>Anime Mystery & Lore Sleuth Bot Ready!</b>\n\n"
+                "Uncover hidden questions and secrets with these commands:\n"
+                "• /ongoing — Generate mystery questions & riddles for current ongoing anime\n"
+                "• /mysteries <i>Anime Name</i> — Find unsolved questions & plot threads\n"
+                "• /foreshadow <i>Anime Name</i> — Spot hidden clues & Easter eggs\n"
+                "• /theories <i>Anime Name</i> — Read top community fan theories\n"
+                "• /lore <i>Anime Name</i> — Dive into world history & hidden secrets\n"
+                "• /summary <i>Anime Name</i> — Overview with key remaining mysteries"
             )
             send_telegram_message(help_msg, chat_id)
     except Exception as e:
-        print(f"❌ Error processing command {cmd}: {e}")
-        send_telegram_message(f"⚠️ Sorry, an error occurred while generating your <code>{cmd}</code> report.", chat_id)
+        print(f"❌ Error: {e}")
+        send_telegram_message(f"⚠️ Sorry, an error occurred while processing your <code>{cmd}</code> request.", chat_id)
+
 def main():
-    command_text = os.environ.get("BOT_COMMAND", "").strip() or "/update"
+    command_text = os.environ.get("BOT_COMMAND", "").strip() or "/help"
     print(f"⚡ Executing command: {command_text}")
     process_command(command_text, TELEGRAM_CHAT_ID)
     print("✅ Finished and shutting down!")
