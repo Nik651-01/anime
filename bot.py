@@ -142,6 +142,38 @@ def handle_ongoing_questions():
     except Exception as e:
         return f"⚠️ Error generating ongoing questions: {e}"
 
+
+def handle_heated_debates(query="anime mystery plot twist"):
+    search_q = query if query else "anime mystery plot twist"
+    # sort=comments pulls the threads with the highest user engagement and debate
+    url = f"https://www.reddit.com/r/anime/search.rss?q={search_q}&restrict_sr=on&sort=comments&t=month"
+    
+    items = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=10)
+        feed = feedparser.parse(res.content)
+        for entry in feed.entries[:5]:
+            title = entry.get("title", "Untitled")
+            snippet = entry.get("summary", "")[:250].replace("\n", " ")
+            link = entry.get("link", "")
+            items.append(f"🔥 <b>{title}</b>\n💬 {snippet}\n🔗 <a href='{link}'>Read Reddit Discussion</a>")
+    except Exception as e:
+        print(f"Reddit RSS error: {e}")
+    
+    if not items:
+        return "❌ No heated discussions found right now."
+    
+    prompt = f"""
+    You are an Anime Debate & Controversy Analyst. Review these top active Reddit discussion threads and summarize the most heated arguments, burning questions, and community divisions.
+    Use ONLY Telegram HTML tags (<b>, <i>, <tg-spoiler>, <a href="...">). Do NOT use Markdown (** or #).
+
+    Format the response nicely with fiery insights into what fans are arguing about right now!
+
+    Reddit Threads Data:
+    {chr(10).join(items)}
+    """
+    return ask_gemini(prompt)
+
 def handle_mysteries(query):
     if not query:
         return "❓ Please specify an anime name! Example: <code>/mysteries Attack on Titan</code>"
@@ -286,17 +318,22 @@ def process_command(text, chat_id):
         elif cmd == "/summary":
             send_telegram_message(f"⏳ <i>Analyzing plot & lingering questions for '{arg}'...</i>", chat_id)
             send_telegram_message(handle_summary(arg), chat_id)
+        elif cmd == "/heated":
+            send_telegram_message(f"🔥 <i>Scouting Reddit for the most heated anime debates{' about ' + arg if arg else ''}...</i>", chat_id)
+            send_telegram_message(handle_heated_debates(arg), chat_id)
+            
         elif cmd in ["/start", "/help"]:
             help_msg = (
-                "🕵️‍♂️ <b>Anime Mystery & Lore Sleuth Bot Ready!</b>\n\n"
-                "Uncover hidden questions and secrets with these commands:\n"
-                "• /ongoing — Generate mystery questions & riddles for current ongoing anime\n"
-                "• /mysteries <i>Anime Name</i> — Find unsolved questions & plot threads\n"
-                "• /foreshadow <i>Anime Name</i> — Spot hidden clues & Easter eggs\n"
-                "• /theories <i>Anime Name</i> — Read top community fan theories\n"
-                "• /lore <i>Anime Name</i> — Dive into world history & hidden secrets\n"
-                "• /summary <i>Anime Name</i> — Overview with key remaining mysteries"
-            )
+                    "🕵️‍♂️ <b>Anime Mystery & Lore Sleuth Bot Ready!</b>\n\n"
+                    "Uncover hidden questions and secrets with these commands:\n"
+                    "• /ongoing — Mystery questions for current ongoing anime\n"
+                    "• /heated <i>[optional topic]</i> — Pull most heated/debated Reddit threads\n"
+                    "• /mysteries <i>Anime Name</i> — Find unsolved questions & plot threads\n"
+                    "• /foreshadow <i>Anime Name</i> — Spot hidden clues & Easter eggs\n"
+                    "• /theories <i>Anime Name</i> — Read top community fan theories\n"
+                    "• /lore <i>Anime Name</i> — Dive into world history & hidden secrets\n"
+                    "• /summary <i>Anime Name</i> — Overview with key remaining mysteries"
+                )
             send_telegram_message(help_msg, chat_id)
     except Exception as e:
         print(f"❌ Error: {e}")
